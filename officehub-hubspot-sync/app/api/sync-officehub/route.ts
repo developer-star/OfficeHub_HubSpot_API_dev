@@ -9,6 +9,7 @@ import {
   associateDealToCompany,
   associateDealToContact
 } from "@/lib/hubspot";
+import { ensureOfficeHubFields } from "@/lib/hubspot";
 
 export const runtime = "nodejs";
 
@@ -36,10 +37,19 @@ function must(name: string) {
   return v;
 }
 
+let hubspotFieldsChecked = false;
+
 export async function GET(req: NextRequest) { return run(req); }
 export async function POST(req: NextRequest) { return run(req); }
 
+await ensureOfficeHubFields();
+
 async function run(req: NextRequest) {
+  if (!hubspotFieldsChecked) {
+    await ensureOfficeHubFields();
+    hubspotFieldsChecked = true;
+  }
+
   const started = Date.now();
   const errors: string[] = [];
 
@@ -54,12 +64,12 @@ async function run(req: NextRequest) {
     must("OFFICEHUB_API_BASE");
     must("OFFICEHUB_API_KEY");
   } catch (e: any) {
-    return NextResponse.json({ success:false, errors:[e?.message || String(e)] }, { status:500 });
+    return NextResponse.json({ success: false, errors: [e?.message || String(e)] }, { status: 500 });
   }
 
   // HubSpot token required ONLY if not dryRun
   if (!dryRun && !has("HUBSPOT_TOKEN")) {
-    return NextResponse.json({ success:false, errors:["Missing env: HUBSPOT_TOKEN"] }, { status:500 });
+    return NextResponse.json({ success: false, errors: ["Missing env: HUBSPOT_TOKEN"] }, { status: 500 });
   }
 
   try {
@@ -117,11 +127,14 @@ async function run(req: NextRequest) {
           lastname: (t.last_name || "").trim() || "OfficeHub",
           phone: (t.mobile_num || t.phone_num || "").trim(),
           company: (t.company_name || "").trim(),
+          officehub_id: lead.id, // <-- Add this line
         };
 
         // Contact upsert
         const { action, contact } = await upsertContact(props);
-        if (action === "created") newContacts++; else updatedContacts++;
+        if (action === "created") newContacts++;
+        else updatedContacts++;
+
 
         // Company create + associate (if company name present)
         let companyId: string | null = null;
@@ -134,16 +147,16 @@ async function run(req: NextRequest) {
             });
             companiesCreated++;
           }
-          try { await associateContactToCompany(contact.id, companyId!); } catch {}
+          try { await associateContactToCompany(contact.id, companyId!); } catch { }
         }
 
         // Deal create + associate (optional)
         if (PIPELINE && DEALSTAGE) {
           const dealName = `OfficeHub Lead – ${(props.firstname + " " + props.lastname).trim()}`.replace(/\s+/g, " ");
-          const dealId = await createDeal({ dealname: dealName, pipeline: PIPELINE, dealstage: DEALSTAGE });
+          const dealId = await createDeal({ dealname: dealName, pipeline: PIPELINE, dealstage: DEALSTAGE, officehub_id: lead.id, });
           dealsCreated++;
-          try { await associateDealToContact(dealId, contact.id); } catch {}
-          if (companyId) { try { await associateDealToCompany(dealId, companyId); } catch {} }
+          try { await associateDealToContact(dealId, contact.id); } catch { }
+          if (companyId) { try { await associateDealToCompany(dealId, companyId); } catch { } }
         }
 
         // Polite delay to avoid rate limits

@@ -37,7 +37,7 @@ export async function fetchLeads(hours = 24, createdAfter?: string): Promise<Off
     const params = new URLSearchParams();
     params.set("client", apiKey);
     // IMPORTANT: correct casing + value format
-    params.set("modifiedIn", `LAST_N_HOURS:${hours}`);
+    params.set("modifiedIn", `last_n_hours:${hours}`);
     if (createdAfter) params.set("createdafter", createdAfter);
 
     const url = `${base}/services/apexrest/v1/leads?${params.toString()}`;
